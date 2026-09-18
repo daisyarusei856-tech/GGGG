@@ -1,15 +1,13 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import classNames from 'classnames';
 import { observer } from 'mobx-react-lite';
 import { useLocation, useNavigate } from 'react-router-dom';
-import ChunkLoader from '@/components/loader/chunk-loader';
 import { generateOAuthURL } from '@/components/shared';
 import DesktopWrapper from '@/components/shared_ui/desktop-wrapper';
 import Dialog from '@/components/shared_ui/dialog';
 import MobileWrapper from '@/components/shared_ui/mobile-wrapper';
 import Tabs from '@/components/shared_ui/tabs/tabs';
 import TradeTypeConfirmationModal from '@/components/trade-type-confirmation-modal';
-import TradingViewModal from '@/components/trading-view-chart/trading-view-modal';
 import { DBOT_TABS, TAB_IDS } from '@/constants/bot-contents';
 import { api_base, updateWorkspaceName } from '@/external/bot-skeleton';
 import { CONNECTION_STATUS } from '@/external/bot-skeleton/services/api/observables/connection-status-stream';
@@ -30,22 +28,16 @@ import {
     setModalStateChangeCallback,
 } from '@/utils/trade-type-modal-handler';
 import {
-    LabelPairedChartLineCaptionRegularIcon,
     LabelPairedObjectsColumnCaptionRegularIcon,
     LabelPairedPuzzlePieceTwoCaptionBoldIcon,
 } from '@deriv/quill-icons/LabelPaired';
-import { LegacyGuide1pxIcon } from '@deriv/quill-icons/Legacy';
 import { Localize, localize } from '@deriv-com/translations';
 import { useDevice } from '@deriv-com/ui';
 import RunPanel from '../../components/run-panel';
 import MainDollarzoneBanner from '@/components/premium/MainDollarzoneBanner';
-import ChartModal from '../chart/chart-modal';
 import Dashboard from '../dashboard';
 import RunStrategy from '../dashboard/run-strategy';
 import './main.scss';
-
-const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
-const Tutorial = lazy(() => import('../tutorials'));
 
 const AppWrapper = observer(() => {
     const { connectionStatus } = useApiBase();
@@ -54,8 +46,6 @@ const AppWrapper = observer(() => {
     const {
         active_tab,
         active_tour,
-        is_chart_modal_visible,
-        is_trading_view_modal_visible,
         setActiveTab,
         setWebSocketState,
         setActiveTour,
@@ -83,7 +73,6 @@ const AppWrapper = observer(() => {
     const location = useLocation();
     const navigate = useNavigate();
     const [left_tab_shadow, setLeftTabShadow] = useState<boolean>(false);
-    const [right_tab_shadow, setRightTabShadow] = useState<boolean>(false);
 
     // Trade type modal state
     const [tradeTypeModalState, setTradeTypeModalState] = useState(getModalState());
@@ -141,7 +130,8 @@ const AppWrapper = observer(() => {
 
     React.useEffect(() => {
         const el_dashboard = document.getElementById('id-dbot-dashboard');
-        const el_tutorial = document.getElementById('id-tutorials');
+
+        if (!el_dashboard) return;
 
         const observer_dashboard = new window.IntersectionObserver(
             ([entry]) => {
@@ -157,21 +147,9 @@ const AppWrapper = observer(() => {
             }
         );
 
-        const observer_tutorial = new window.IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setRightTabShadow(false);
-                    return;
-                }
-                setRightTabShadow(true);
-            },
-            {
-                root: null,
-                threshold: 0.5, // set offset 0.1 means trigger if atleast 10% of element in viewport
-            }
-        );
         observer_dashboard.observe(el_dashboard);
-        observer_tutorial.observe(el_tutorial);
+
+        return () => observer_dashboard.disconnect();
     });
 
     React.useEffect(() => {
@@ -190,12 +168,10 @@ const AppWrapper = observer(() => {
     const updateTabShadowsHeight = () => {
         const botBuilderEl = document.getElementById('id-bot-builder');
         const leftShadow = document.querySelector('.tabs-shadow--left') as HTMLElement;
-        const rightShadow = document.querySelector('.tabs-shadow--right') as HTMLElement;
 
-        if (botBuilderEl && leftShadow && rightShadow) {
+        if (botBuilderEl && leftShadow) {
             const height = botBuilderEl.offsetHeight;
             leftShadow.style.height = `${height}px`;
-            rightShadow.style.height = `${height}px`;
         }
     };
 
@@ -403,55 +379,8 @@ const AppWrapper = observer(() => {
                                 }
                                 id='id-bot-builder'
                             />
-                            <div
-                                label={
-                                    <>
-                                        <LabelPairedChartLineCaptionRegularIcon
-                                            height='24px'
-                                            width='24px'
-                                            fill='var(--text-general)'
-                                        />
-                                        <Localize i18n_default_text='Charts' />
-                                    </>
-                                }
-                                id={
-                                    is_chart_modal_visible || is_trading_view_modal_visible
-                                        ? 'id-charts--disabled'
-                                        : 'id-charts'
-                                }
-                            >
-                                <Suspense
-                                    fallback={<ChunkLoader message={localize('Please wait, loading chart...')} />}
-                                >
-                                    <ChartWrapper show_digits_stats={false} />
-                                </Suspense>
-                            </div>
-                            <div
-                                label={
-                                    <>
-                                        <LegacyGuide1pxIcon
-                                            height='16px'
-                                            width='16px'
-                                            fill='var(--text-general)'
-                                            className='icon-general-fill-g-path'
-                                        />
-                                        <Localize i18n_default_text='Tutorials' />
-                                    </>
-                                }
-                                id='id-tutorials'
-                            >
-                                <div className='tutorials-wrapper'>
-                                    <Suspense
-                                        fallback={
-                                            <ChunkLoader message={localize('Please wait, loading tutorials...')} />
-                                        }
-                                    >
-                                        <Tutorial handleTabChange={handleTabChange} />
-                                    </Suspense>
-                                </div>
-                            </div>
                         </Tabs>
-                        {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}{' '}
+
                     </div>
                 </div>
             </div>
@@ -460,8 +389,6 @@ const AppWrapper = observer(() => {
                     <RunStrategy />
                     <RunPanel />
                 </div>
-                <ChartModal />
-                <TradingViewModal />
             </DesktopWrapper>
             <MobileWrapper>{!is_open && <RunPanel />}</MobileWrapper>
             <Dialog
