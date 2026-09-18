@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import lionLogo from '@/assets/images/lion_logo_1789599001445.jpg';
 import { loadStrategyToBotBuilder } from '@/utils/bot-loader-utils';
 import { getYouTubeEmbedUrl } from '@/utils/youtube-helper';
+import { CopyTradingService, type CopyFollower, type CopyLog } from '@/services/copy-trading.service';
 import { DownloadIcon } from '../icons';
 
 export type UserBotItem = {
@@ -78,12 +79,13 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved !== null) {
                 const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed)) return parsed;
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
             }
         } catch (e) {
             console.error('Failed reading user bots from storage', e);
         }
-        return [];
+        // Fall back to the built-in free bots so the page always has content.
+        return DEFAULT_FEATURED_BOTS;
     });
 
     const [displayMode, setDisplayMode] = useState<'horizontal' | 'grid'>(() => {
@@ -102,7 +104,25 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
     const [activeVideoModalUrl, setActiveVideoModalUrl] = useState<string | null>(null);
     const [activeVideoTitle, setActiveVideoTitle] = useState<string>('');
 
+    // Copy trading modal state
+    const [copyBot, setCopyBot] = useState<UserBotItem | null>(null);
+    const [copyTokens, setCopyTokens] = useState('');
+    const [copyFollowers, setCopyFollowers] = useState<CopyFollower[]>([]);
+    const [copyLogs, setCopyLogs] = useState<CopyLog[]>([]);
+    const [copyBusy, setCopyBusy] = useState(false);
+    const [copyRunning, setCopyRunning] = useState(CopyTradingService.isRunning());
+
     const sliderRef = useRef<HTMLDivElement | null>(null);
+
+    // Stream copy trading logs into the modal
+    useEffect(() => {
+        const unsubscribe = CopyTradingService.subscribe(log => {
+            setCopyLogs(prev => [log, ...prev].slice(0, 50));
+        });
+        return () => {
+            unsubscribe();
+        };
+    }, []);
 
     // Sync localStorage changes from Admin Panel
     useEffect(() => {
@@ -111,7 +131,7 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
                 const saved = localStorage.getItem(STORAGE_KEY);
                 if (saved !== null) {
                     const parsed = JSON.parse(saved);
-                    if (Array.isArray(parsed)) setUserBots(parsed);
+                    if (Array.isArray(parsed)) setUserBots(parsed.length > 0 ? parsed : DEFAULT_FEATURED_BOTS);
                 }
                 const layout = localStorage.getItem(LAYOUT_STORAGE_KEY);
                 if (layout === 'grid' || layout === 'horizontal') setDisplayMode(layout);
@@ -150,6 +170,49 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    };
+
+    const openCopyModal = (bot: UserBotItem) => {
+        setCopyBot(bot);
+        setCopyRunning(CopyTradingService.isRunning());
+        setCopyFollowers(CopyTradingService.getFollowers());
+    };
+
+    const closeCopyModal = () => {
+        setCopyBot(null);
+    };
+
+    const pushCopyError = (message: string) => {
+        setCopyLogs(prev => [{ id: `${Date.now()}-${Math.random()}`, at: Date.now(), level: 'error', message }, ...prev].slice(0, 50));
+    };
+
+    const handleSyncTokens = async () => {
+        setCopyBusy(true);
+        try {
+            const followers = await CopyTradingService.syncTokens(copyTokens);
+            setCopyFollowers(followers.map(item => ({ ...item, token: '' })));
+        } catch (err) {
+            pushCopyError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setCopyBusy(false);
+        }
+    };
+
+    const handleStartCopy = async () => {
+        setCopyBusy(true);
+        try {
+            await CopyTradingService.start();
+            setCopyRunning(true);
+        } catch (err) {
+            pushCopyError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setCopyBusy(false);
+        }
+    };
+
+    const handleStopCopy = () => {
+        CopyTradingService.stop();
+        setCopyRunning(false);
     };
 
     const scrollSlider = (direction: 'left' | 'right') => {
@@ -368,6 +431,24 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
                                             >
                                                 💾
                                             </button>
+                                            <button
+                                                type='button'
+                                                onClick={() => openCopyModal(bot)}
+                                                title='Copy trade this bot'
+                                                style={{
+                                                    padding: '0 14px',
+                                                    borderRadius: 8,
+                                                    border: '1px solid #059669',
+                                                    background: 'transparent',
+                                                    color: '#059669',
+                                                    fontWeight: 800,
+                                                    cursor: 'pointer',
+                                                    fontSize: 13,
+                                                    whiteSpace: 'nowrap',
+                                                }}
+                                            >
+                                                ⇄ Copy
+                                            </button>
                                         </div>
                                     </div>
                                 </article>
@@ -481,6 +562,24 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
                                         >
                                             💾
                                         </button>
+                                        <button
+                                            type='button'
+                                            onClick={() => openCopyModal(bot)}
+                                            title='Copy trade this bot'
+                                            style={{
+                                                padding: '0 14px',
+                                                borderRadius: 8,
+                                                border: '1px solid #059669',
+                                                background: 'transparent',
+                                                color: '#059669',
+                                                fontWeight: 800,
+                                                cursor: 'pointer',
+                                                fontSize: 13,
+                                                whiteSpace: 'nowrap',
+                                            }}
+                                        >
+                                            ⇄ Copy
+                                        </button>
                                     </div>
                                 </div>
                             </article>
@@ -537,6 +636,197 @@ export const FreeBotsPage = ({ openBotBuilder }: { openBotBuilder?: () => void }
                                 allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
                                 allowFullScreen
                             />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Copy Trading Modal */}
+            {copyBot && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 99999,
+                        background: 'rgba(0, 0, 0, 0.85)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 20,
+                    }}
+                    onClick={closeCopyModal}
+                >
+                    <div
+                        style={{
+                            position: 'relative',
+                            width: '100%',
+                            maxWidth: 560,
+                            maxHeight: '90vh',
+                            overflowY: 'auto',
+                            background: 'var(--site-card-bg, #ffffff)',
+                            borderRadius: 16,
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                            border: '1px solid var(--site-border, #e2e8f0)',
+                        }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--site-border, #e2e8f0)' }}>
+                            <div>
+                                <h3 style={{ margin: 0, color: 'var(--site-text, #0f172a)', fontSize: 16, fontWeight: 800 }}>
+                                    ⇄ Copy Trading
+                                </h3>
+                                <small style={{ color: 'var(--site-text-muted, #64748b)', fontSize: 12 }}>{copyBot.name}</small>
+                            </div>
+                            <button
+                                type='button'
+                                onClick={closeCopyModal}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--site-text-muted, #94a3b8)', fontSize: 20, cursor: 'pointer', fontWeight: 'bold' }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--site-text-muted, #64748b)' }}>
+                                Load this bot into the Bot Builder and run it on your master account. Paste your follower Personal Access Tokens below to mirror every trade to those accounts automatically.
+                            </p>
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--site-text, #0f172a)' }}>
+                                    Follower Tokens
+                                </label>
+                                <textarea
+                                    value={copyTokens}
+                                    onChange={e => setCopyTokens(e.target.value)}
+                                    placeholder='Paste one or more follower tokens, separated by commas or new lines'
+                                    rows={3}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 12px',
+                                        borderRadius: 8,
+                                        border: '1px solid var(--site-border, #cbd5e1)',
+                                        background: 'var(--site-bg, #ffffff)',
+                                        color: 'var(--site-text, #0f172a)',
+                                        fontSize: 13,
+                                        resize: 'vertical',
+                                        boxSizing: 'border-box',
+                                    }}
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button
+                                    type='button'
+                                    disabled={copyBusy || !copyTokens.trim()}
+                                    onClick={handleSyncTokens}
+                                    style={{
+                                        padding: '10px 16px',
+                                        borderRadius: 8,
+                                        border: '1px solid var(--site-border, #cbd5e1)',
+                                        background: 'transparent',
+                                        color: 'var(--site-text, #0f172a)',
+                                        fontWeight: 700,
+                                        cursor: copyBusy || !copyTokens.trim() ? 'not-allowed' : 'pointer',
+                                        opacity: copyBusy || !copyTokens.trim() ? 0.6 : 1,
+                                        fontSize: 13,
+                                    }}
+                                >
+                                    {copyBusy ? 'Working…' : 'Sync Followers'}
+                                </button>
+                                <button
+                                    type='button'
+                                    onClick={() => handleLoadBot(copyBot)}
+                                    disabled={busyId === copyBot.id}
+                                    style={{
+                                        padding: '10px 16px',
+                                        borderRadius: 8,
+                                        border: '1px solid #059669',
+                                        background: 'transparent',
+                                        color: '#059669',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        fontSize: 13,
+                                    }}
+                                >
+                                    {busyId === copyBot.id ? 'Loading…' : 'Load into Bot Builder'}
+                                </button>
+                                {copyRunning ? (
+                                    <button
+                                        type='button'
+                                        onClick={handleStopCopy}
+                                        style={{
+                                            padding: '10px 16px',
+                                            borderRadius: 8,
+                                            border: 'none',
+                                            background: '#dc2626',
+                                            color: '#ffffff',
+                                            fontWeight: 800,
+                                            cursor: 'pointer',
+                                            fontSize: 13,
+                                            marginLeft: 'auto',
+                                        }}
+                                    >
+                                        Stop Copying
+                                    </button>
+                                ) : (
+                                    <button
+                                        type='button'
+                                        disabled={copyBusy || copyFollowers.length === 0}
+                                        onClick={handleStartCopy}
+                                        style={{
+                                            padding: '10px 16px',
+                                            borderRadius: 8,
+                                            border: 'none',
+                                            background: '#059669',
+                                            color: '#ffffff',
+                                            fontWeight: 800,
+                                            cursor: copyBusy || copyFollowers.length === 0 ? 'not-allowed' : 'pointer',
+                                            opacity: copyBusy || copyFollowers.length === 0 ? 0.6 : 1,
+                                            fontSize: 13,
+                                            marginLeft: 'auto',
+                                        }}
+                                    >
+                                        Start Copying
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Synced followers */}
+                            {copyFollowers.length > 0 && (
+                                <div style={{ border: '1px solid var(--site-border, #e2e8f0)', borderRadius: 8, overflow: 'hidden' }}>
+                                    <div style={{ padding: '8px 12px', background: 'var(--site-card-bg, #f8fafc)', fontSize: 12, fontWeight: 700, color: 'var(--site-text, #0f172a)' }}>
+                                        Synced Followers ({copyFollowers.length})
+                                    </div>
+                                    {copyFollowers.map(follower => (
+                                        <div key={follower.id} style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 12, borderTop: '1px solid var(--site-border, #e2e8f0)', color: 'var(--site-text-muted, #64748b)' }}>
+                                            <span>{follower.account_id} · {follower.account_type}</span>
+                                            <span>{follower.balance.toLocaleString()} {follower.currency}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Activity log */}
+                            {copyLogs.length > 0 && (
+                                <div style={{ border: '1px solid var(--site-border, #e2e8f0)', borderRadius: 8, maxHeight: 180, overflowY: 'auto' }}>
+                                    <div style={{ padding: '8px 12px', background: 'var(--site-card-bg, #f8fafc)', fontSize: 12, fontWeight: 700, color: 'var(--site-text, #0f172a)', position: 'sticky', top: 0 }}>
+                                        Activity Log
+                                    </div>
+                                    {copyLogs.map(log => (
+                                        <div
+                                            key={log.id}
+                                            style={{
+                                                padding: '6px 12px',
+                                                fontSize: 12,
+                                                borderTop: '1px solid var(--site-border, #e2e8f0)',
+                                                color: log.level === 'error' ? '#dc2626' : log.level === 'success' ? '#15803d' : 'var(--site-text-muted, #64748b)',
+                                            }}
+                                        >
+                                            {log.message}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
