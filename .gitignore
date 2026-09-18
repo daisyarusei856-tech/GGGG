@@ -11,6 +11,9 @@ build/
 .cache/
 .tmp/
 tmp/
+# Keep the committed Icon stub that shared_ui components import
+!src/utils/tmp/
+!src/utils/tmp/dummy.tsx
 node_modules/
 bun.lock
 .eslintcache
